@@ -4,9 +4,10 @@ Party of Canada) exceeded that riding’s winner’s vote total, where the event
 """
 import re
 from dataclasses import dataclass, fields
-from typing import List
+from typing import List, Any
 from urllib.request import urlopen
 
+import pandas as pd
 from bs4 import BeautifulSoup, Tag
 from urllib3 import HTTPResponse
 
@@ -40,8 +41,16 @@ class VotesByParty:
     OTHER: int = 0
 
     @classmethod
+    def column_names(cls):
+        return ["votes_" + field.lower() for field in cls.field_names()]
+
+    @classmethod
     def field_names(cls):
-        return ["votes_" + field.name.lower() for field in fields(cls)]
+        return [field.name for field in fields(cls)]
+
+    @property
+    def data_list(self):
+        return [getattr(self, field) for field in self.field_names()]
 
 
 @dataclass
@@ -61,8 +70,14 @@ class ParsedRow:
         return f"{self.riding} - {self.province}"
 
     @classmethod
-    def field_names(cls):
+    def column_names(cls):
         return [field.name for field in fields(cls)]
+
+    @property
+    def data_list(self):
+        return [
+            getattr(self, field) for field in self.column_names()[:-1]
+        ] + self.votes.data_list
 
 
 def parse_riding(row_data: List[Tag]) -> str:
@@ -124,12 +139,12 @@ def parse_row(row: Tag) -> ParsedRow:
     )
 
 
-def column_names() -> List[str]:
+def column_names() -> List[List[Any]]:
     """Return table column names to be used in Pandas dataframe."""
-    return ParsedRow.field_names()[:-1] + VotesByParty.field_names()
+    return ParsedRow.column_names()[:-1] + VotesByParty.column_names()
 
 
-def get_page():
+def get_data_lists():
     html: HTTPResponse = urlopen(LINK)
     soup = BeautifulSoup(html, "html.parser")
     tables: List[Tag] = soup.find_all("table")
@@ -137,6 +152,11 @@ def get_page():
     rows = table.find_all("tr")
     data_rows = rows[NROWS_HEADER:]
     parsed_rows = [parse_row(row) for row in data_rows]
-    for i, pr in enumerate(parsed_rows):
-        print(i + 1, pr)
-    return soup
+    pandas_rows = [row.data_list for row in parsed_rows]
+    return pandas_rows
+
+
+def get_table_df() -> pd.DataFrame:
+    data = get_data_lists()
+    df = pd.DataFrame(data=data, columns=column_names())
+    return df
